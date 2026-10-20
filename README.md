@@ -96,6 +96,9 @@ go get github.com/Sliverkiss/toolkit
 
 要求 Go 1.22+。唯一外部依赖：`gopkg.in/yaml.v3`。
 
+## 致谢
+[YuJunZhiXue](https://github.com/YuJunZhiXue)
+
 ## 许可
 
 **CC BY-NC-SA 4.0**，详见 [LICENSE](LICENSE)。**禁止商用。**
