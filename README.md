@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="toolkit" width="300">
+  <img src="logo.png" alt="toolkit" width="200">
 </p>
 
 <h1 align="center">toolkit</h1>
