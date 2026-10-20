@@ -76,12 +76,68 @@ calls, err := fc.ParseTextToCalls(modelText, tools, "openai", true)
 
 ## 工作原理
 
+整体链路：客户端说标准 OpenAI 协议，toolkit 在中间做 XYML 注入 / 解析 / 清洗，上游只看到纯文本对话。
+
+```mermaid
+flowchart LR
+    subgraph CLIENT["客户端"]
+        SDK["OpenAI SDK / 任意工具"]
+    end
+
+    subgraph TOOLKIT["toolkit（本库）"]
+        direction TB
+        INJ["fc — XYML 协议块注入<br/>system prompt"] --> UP["你的网关发请求<br/>（HTTP 由你完成）"]
+        UP --> REASM["stream — 流式重组器<br/>缓存半截片段 · 增量下发"]
+        REASM --> PARSE["fc / engine — 解析回 tool_calls<br/>CDATA 嵌套 · 标签融合容错"]
+        PARSE --> SIEVE["engine sieve — 协议防泄漏<br/>解析失败的标记一律剥离"]
+    end
+
+    subgraph UPSTREAM["上游（无原生 FC）"]
+        LLM["LLM API<br/>反代 / 自建 / 本地模型"]
+    end
+
+    SDK -- "tools / tool_choice" --> INJ
+    SIEVE -- "普通 prompt" --> LLM
+    LLM -- "文本流 (SSE)" --> REASM
+    SIEVE -- "标准 tool_calls" --> SDK
+    SDK -- "role:tool 结果" --> INJ
 ```
-客户端 (OpenAI SDK)         toolkit                        上游 (无原生 FC)
-   tools / tool_choice ──►  注入 XYML 系统块        ──►  普通 prompt
-   ◄── tool_calls      ◄──  解析 + 清洗 + 流式重组   ◄──  文本流
-   role:"tool" 结果    ──►  渲染 [Tool Result] 块   ──►  普通 prompt
+
+一次完整调用的时序：
+
+```mermaid
+sequenceDiagram
+    participant C as 客户端 (OpenAI SDK)
+    participant T as toolkit
+    participant U as 上游 LLM
+
+    C->>T: POST /chat/completions (tools, tool_choice)
+    T->>T: fc 注入 XYML 协议块 (none 则零注入)
+    T->>U: 纯文本消息列表
+    U-->>T: 文本流 (SSE deltas)
+    T->>T: stream 重组器缓存片段 · sieve 剥离协议标记
+    T-->>C: 安全内容增量下发
+    T->>T: 流末解析完整 tool_calls (engine XYML 解析)
+    T-->>C: tool_calls + finish_reason:"tool_calls"
+    C->>T: role:"tool" 执行结果
+    T->>U: 渲染 [Tool Result] 块，继续下一轮
+    U-->>C: 最终回答
 ```
+
+包依赖层次（下层不感知上层）：
+
+```mermaid
+flowchart TD
+    stream --> convert & engine & fc & reqlog & util
+    adapters --> convert & engine & fc & util
+    convert --> engine & jsonx & models & util
+    fc --> config & engine & jsonx & models
+    engine --> jsonx & models & util
+    models & reqlog & config --> jsonx
+    util --> jsonx & models
+```
+
+行为细节：
 
 - `tool_choice` 全量支持：`auto`、`none`（零注入）、`required`、指定函数名；
 - `tool_choice` 中未知的工具名提前拒绝；
