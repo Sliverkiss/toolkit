@@ -79,28 +79,31 @@ calls, err := fc.ParseTextToCalls(modelText, tools, "openai", true)
 整体链路：客户端说标准 OpenAI 协议，toolkit 在中间做 XYML 注入 / 解析 / 清洗，上游只看到纯文本对话。
 
 ```mermaid
-flowchart LR
-    subgraph CLIENT["客户端"]
-        SDK["OpenAI SDK / 任意工具"]
+flowchart TB
+    SDK["🖥️ 客户端 — OpenAI SDK / 任意工具"]
+    LLM["🦑 上游 LLM — 反代 / 自建 / 本地模型（无原生 FC）"]
+
+    subgraph TOOLKIT["⚙️ toolkit 管线"]
+        direction LR
+        INJ["fc<br/>注入 XYML 协议块<br/>进 system prompt"]
+        REASM["stream<br/>流式重组器<br/>缓存半截片段"]
+        PARSE["fc + engine<br/>解析回 tool_calls<br/>CDATA / 标签融合容错"]
+        SIEVE["engine sieve<br/>协议防泄漏<br/>坏标记一律剥离"]
+        INJ --> REASM --> PARSE --> SIEVE
     end
 
-    subgraph TOOLKIT["toolkit（本库）"]
-        direction TB
-        INJ["fc — XYML 协议块注入<br/>system prompt"] --> UP["你的网关发请求<br/>（HTTP 由你完成）"]
-        UP --> REASM["stream — 流式重组器<br/>缓存半截片段 · 增量下发"]
-        REASM --> PARSE["fc / engine — 解析回 tool_calls<br/>CDATA 嵌套 · 标签融合容错"]
-        PARSE --> SIEVE["engine sieve — 协议防泄漏<br/>解析失败的标记一律剥离"]
-    end
+    SDK -- "① tools / tool_choice" --> INJ
+    SIEVE -- "② 普通 prompt（纯文本）" --> LLM
+    LLM -- "③ 文本流 SSE" --> REASM
+    SIEVE -- "④ 标准 tool_calls" --> SDK
+    SDK -. "⑤ role:tool 结果回传" .-> INJ
 
-    subgraph UPSTREAM["上游（无原生 FC）"]
-        LLM["LLM API<br/>反代 / 自建 / 本地模型"]
-    end
-
-    SDK -- "tools / tool_choice" --> INJ
-    SIEVE -- "普通 prompt" --> LLM
-    LLM -- "文本流 (SSE)" --> REASM
-    SIEVE -- "标准 tool_calls" --> SDK
-    SDK -- "role:tool 结果" --> INJ
+    style SDK fill:#412991,color:#fff
+    style LLM fill:#00ADD8,color:#fff
+    style INJ fill:#1f6feb,color:#fff
+    style REASM fill:#0DBD8B,color:#fff
+    style PARSE fill:#d29922,color:#fff
+    style SIEVE fill:#8250df,color:#fff
 ```
 
 一次完整调用的时序：
@@ -127,14 +130,33 @@ sequenceDiagram
 包依赖层次（下层不感知上层）：
 
 ```mermaid
-flowchart TD
-    stream --> convert & engine & fc & reqlog & util
-    adapters --> convert & engine & fc & util
-    convert --> engine & jsonx & models & util
-    fc --> config & engine & jsonx & models
-    engine --> jsonx & models & util
-    models & reqlog & config --> jsonx
+flowchart BT
+    subgraph L0["基础层"]
+        jsonx
+        models
+        reqlog
+        config
+    end
+    subgraph L1["核心层"]
+        util
+        engine
+    end
+    subgraph L2["功能层"]
+        fc
+        convert
+    end
+    subgraph L3["接入层"]
+        stream
+        adapters
+    end
+    stream --> fc & convert & engine & reqlog & util
+    adapters --> fc & convert & engine & util
+    convert --> engine & util
+    fc --> engine & config & models
+    engine --> util
     util --> jsonx & models
+    models --> jsonx
+    config --> jsonx
 ```
 
 行为细节：
