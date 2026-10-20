@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/DGZSbot/ai-icon/refs/heads/main/WorkBuddy.png" alt="toolkit" width="120">
+  <img src="logo.png" alt="toolkit" width="120">
 </p>
 
 <h1 align="center">toolkit</h1>
